@@ -1,3 +1,5 @@
+# Copyright (c) Rui Miao 2021
+# Licensed under the MIT License.
 #%%
 import numpy as np
 import scipy
