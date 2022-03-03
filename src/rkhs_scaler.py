@@ -1,4 +1,4 @@
-# Copyright (c) Rui Miao 2021
+# Copyright (c) Rui Miao 2021-2022
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 import numpy as np
@@ -37,7 +37,7 @@ class _BaseRKHSIV:
         return 60 if _check_auto(self.alpha_scale) else self.alpha_scale
 
     def _get_alpha_scales(self):
-        return ([c for c in np.geomspace(0.1, 1e4, self.n_alphas)]
+        return ([c for c in np.geomspace(0.1, 1e5, self.n_alphas)]
                 if _check_auto(self.alpha_scales) else self.alpha_scales)
 
     def _get_alpha(self, delta, alpha_scale):
@@ -57,7 +57,8 @@ class _BaseRKHSIV:
         if _check_auto(self.gamma_f):
             params = {"squared": True}
             K_condition_euclidean = sklearn.metrics.pairwise_distances(X = condition, metric='euclidean', n_jobs=-1, **params)
-            gamma_f = 1./(condition.shape[1] * np.median(K_condition_euclidean[np.tril_indices(condition.shape[0],-1)]))
+            # gamma_f = 1./(condition.shape[1] * np.median(K_condition_euclidean[np.tril_indices(condition.shape[0],-1)]))
+            gamma_f = 1./(np.median(K_condition_euclidean[np.tril_indices(condition.shape[0],-1)]))
             return gamma_f
         else:
             return self.gamma_f
@@ -116,7 +117,8 @@ class RKHSIV(BaseEstimator, _BaseRKHSIV):
         M = RootKf @ np.linalg.inv(
             Kf / (2 * n * delta**2) + np.eye(n) / 2) @ RootKf
 
-        self.a = np.linalg.pinv(Kh @ M @ Kh + alpha * Kh) @ Kh @ M @ y
+        #self.a = np.linalg.pinv(Kh @ M @ Kh + alpha * Kh) @ Kh @ M @ y
+        self.a = np.linalg.lstsq(Kh @ M @ Kh + alpha * Kh, Kh @ M @ y, rcond=None)[0]
         return self
 
     def predict(self, X):
@@ -162,7 +164,8 @@ class RKHSIVCV(RKHSIV):
         if _check_auto(self.gamma_hs):
             params = {"squared": True}
             K_X_euclidean = sklearn.metrics.pairwise_distances(X = X, metric='euclidean', **params)
-            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            #return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)
         else:
             return self.gamma_hs
 
@@ -216,7 +219,8 @@ class RKHSIVCV(RKHSIV):
                 scores[it1].append([])
                 for alpha_scale in alpha_scales:
                     alpha = self._get_alpha(delta_train, alpha_scale)
-                    a = np.linalg.pinv(KMK_train + alpha * Kh_train) @ B_train
+                    #a = np.linalg.pinv(KMK_train + alpha * Kh_train) @ B_train
+                    a = np.linalg.lstsq(KMK_train + alpha * Kh_train, B_train, rcond=None)[0]
                     res = y[test] - self._get_kernel_h(X=X_test, Y=X_train, gamma_h=gamma_h) @ a
                     scores[it1][it2].append((res.T @ M_test @ res).reshape(-1)[0] / (res.shape[0]**2))
 
@@ -232,8 +236,10 @@ class RKHSIVCV(RKHSIV):
         # Kh
         Kh = self._get_kernel_h(X, gamma_h=self.gamma_h)
 
-        self.a = np.linalg.pinv(
-            Kh @ M @ Kh + self.best_alpha * Kh) @ Kh @ M @ y
+        # self.a = np.linalg.pinv(
+        #     Kh @ M @ Kh + self.best_alpha * Kh) @ Kh @ M @ y
+        self.a = np.linalg.lstsq(
+            Kh @ M @ Kh + self.best_alpha * Kh, Kh @ M @ y, rcond=None)[0]
 
         return self
 
@@ -297,13 +303,15 @@ class ApproxRKHSIV(_BaseRKHSIV):
         A = RootKh.T @ RootKf
         W = (A @ Q @ A.T + alpha * np.eye(self.n_components))
         B = A @ Q @ RootKf.T @ y
-        self.a = np.linalg.pinv(W) @ B
+        # self.a = np.linalg.pinv(W) @ B
+        self.a = np.linalg.lstsq(W, B, rcond=None)[0]
         self.fitted_delta = delta
         return self
 
     def predict(self, X):
         X = self.transX.transform(X)
         return self.featX.transform(X) @ self.a
+
 
 class ApproxRKHSIVCV(ApproxRKHSIV):
 
@@ -340,7 +348,8 @@ class ApproxRKHSIVCV(ApproxRKHSIV):
         if _check_auto(self.gamma_hs):
             params = {"squared": True}
             K_X_euclidean = sklearn.metrics.pairwise_distances(X = X, metric='euclidean', **params)
-            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            #return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)
         else:
             return self.gamma_hs
 
@@ -386,8 +395,10 @@ class ApproxRKHSIVCV(ApproxRKHSIV):
                 scores[it1].append([])
                 for alpha_scale in alpha_scales:
                     alpha = self._get_alpha(delta_train, alpha_scale)
-                    a = np.linalg.pinv(AQA_train + alpha *
-                                       np.eye(self.n_components)) @ B_train
+                    # a = np.linalg.pinv(AQA_train + alpha *
+                    #                    np.eye(self.n_components)) @ B_train
+                    a = np.linalg.lstsq(AQA_train + alpha *
+                                       np.eye(self.n_components), B_train, rcond=None)[0]
                     res = RootKf_test.T @ (y[test] - RootKh_test @ a)
                     scores[it1][it2].append((res.T @ Q_test @ res).reshape(-1)[0] / (len(test)**2))
 
@@ -407,7 +418,8 @@ class ApproxRKHSIVCV(ApproxRKHSIV):
         A = RootKh.T @ RootKf
         W = (A @ Q @ A.T + self.best_alpha * np.eye(self.n_components))
         B = A @ Q @ RootKf.T @ y
-        self.a = np.linalg.pinv(W) @ B
+        # self.a = np.linalg.pinv(W) @ B
+        self.a = np.linalg.lstsq(W, B, rcond=None)[0]
         self.fitted_delta = delta
         return self
 
@@ -451,13 +463,15 @@ class RKHSIV_q(_BaseRKHSIV):
 
         # delta & alpha
         n = X.shape[0]  # number of samples
+        #delta = self._get_delta(n)
         delta = self._get_delta(np.sum(index)) # only sum(index) of effective data
         alpha = self._get_alpha(delta, self._get_alpha_scale())
 
         M = RootKf @ np.linalg.inv(
             Kf / (2 * n * delta**2) + np.eye(n) / 2) @ RootKf
 
-        self.a = np.linalg.pinv(Kh0.T @ M @ Kh0 + alpha * Kh) @ Kh0 @ M @ y
+        # self.a = np.linalg.pinv(Kh0.T @ M @ Kh0 + alpha * Kh) @ Kh0 @ M @ y
+        self.a = np.linalg.lstsq(Kh0.T @ M @ Kh0 + alpha * Kh, Kh0 @ M @ y, rcond=None)[0]
         return self
 
     def predict(self, X):
@@ -466,6 +480,10 @@ class RKHSIV_q(_BaseRKHSIV):
 
     def score(self, X, y, M, index):
         n = X.shape[0]
+        #Kf = self._get_kernel_f(Z, gamma_f=self.gamma_f)
+        #RootKf = scipy.linalg.sqrtm(Kf).astype(float)
+        #M = RootKf @ np.linalg.inv(
+        #    Kf / (2 * n * delta**2) + np.eye(n) / 2) @ RootKf
         y_pred = np.zeros_like(y)
         y_pred[index] = self.predict(X[index,:])
         return ((y - y_pred).T @ M @ (y - y_pred)).reshape(-1)[0] / n**2
@@ -498,7 +516,8 @@ class RKHSIVCV_q(RKHSIV_q):
         if _check_auto(self.gamma_hs):
             params = {"squared": True}
             K_X_euclidean = sklearn.metrics.pairwise_distances(X = X, metric='euclidean', **params)
-            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            # return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)
         else:
             return self.gamma_hs
 
@@ -518,6 +537,12 @@ class RKHSIVCV_q(RKHSIV_q):
         X = self.transX.transform(X)
         self.X = X.copy()
         gamma_hs = self._get_gamma_hs(X)
+        #Khs = []
+        #for gammah in gamma_hs:
+        #    Kh = self._get_kernel_h(X, gamma_h = gammah)
+        #    Kh0 = np.zeros_like(Kh)
+        #    Kh0[index,:] = Kh[index,:]
+        #    Khs.append((Kh, Kh0))
 
         # delta & alpha
         n = X.shape[0]
@@ -553,7 +578,8 @@ class RKHSIVCV_q(RKHSIV_q):
                 scores[it1].append([])
                 for alpha_scale in alpha_scales:
                     alpha = self._get_alpha(delta_train, alpha_scale)
-                    a = np.linalg.pinv(KMK_train + alpha * Kh_train) @ B_train
+                    # a = np.linalg.pinv(KMK_train + alpha * Kh_train) @ B_train
+                    a = np.linalg.lstsq(KMK_train + alpha * Kh_train, B_train, rcond=None)[0]
                     res = y[test]
                     res[index[test]] = y[index[test]] - self._get_kernel_h(X=X_test[index[test],:], Y=X_train, gamma_h=gamma_h) @ a
                     scores[it1][it2].append((res.T @ M_test @ res).reshape(-1)[0] / (res.shape[0]**2))
@@ -573,8 +599,10 @@ class RKHSIVCV_q(RKHSIV_q):
         M = RootKf @ np.linalg.inv(
             Kf / (2 * n * delta**2) + np.eye(n) / 2) @ RootKf
 
-        self.a = np.linalg.pinv(
-            Kh0 @ M @ Kh0 + self.best_alpha * Kh) @ Kh0 @ M @ y
+        # self.a = np.linalg.pinv(
+        #     Kh0 @ M @ Kh0 + self.best_alpha * Kh) @ Kh0 @ M @ y
+        self.a = np.linalg.lstsq(
+            Kh0 @ M @ Kh0 + self.best_alpha * Kh, Kh0 @ M @ y, rcond=None)[0]
         return self
 
 class ApproxRKHSIV_q(_BaseRKHSIV):
@@ -639,13 +667,15 @@ class ApproxRKHSIV_q(_BaseRKHSIV):
         A = RootKh.T @ RootKf
         W = (A @ Q @ A.T + alpha * np.eye(self.n_components))
         B = A @ Q @ RootKf.T @ y
-        self.a = np.linalg.pinv(W) @ B
+        # self.a = np.linalg.pinv(W) @ B
+        self.a = np.linalg.lstsq(W, B, rcond=None)[0]
         self.fitted_delta = delta
         return self
 
     def predict(self, X):
         X = self.transX.transform(X)
         return self.featX.transform(X) @ self.a
+
 
 class ApproxRKHSIVCV_q(ApproxRKHSIV_q):
 
@@ -682,7 +712,8 @@ class ApproxRKHSIVCV_q(ApproxRKHSIV_q):
         if _check_auto(self.gamma_hs):
             params = {"squared": True}
             K_X_euclidean = sklearn.metrics.pairwise_distances(X = X, metric='euclidean', **params)
-            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            # return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)/X.shape[1]
+            return 1./np.quantile(K_X_euclidean[np.tril_indices(X.shape[0],-1)], np.array(range(1, self.n_gamma_hs))/self.n_gamma_hs)
         else:
             return self.gamma_hs
 
@@ -714,6 +745,9 @@ class ApproxRKHSIVCV_q(ApproxRKHSIV_q):
         alpha_scales = self._get_alpha_scales()
         n_train = n * (self.cv - 1) / self.cv
         n_test = n / self.cv
+        #delta_train = self._get_delta(n_train)
+        #delta_test = self._get_delta(n_test)
+        #delta = self._get_delta(n)
 
         scores = []
         for it1, (train, test) in enumerate(StratifiedKFold(n_splits=self.cv).split(X,index)):
@@ -733,8 +767,10 @@ class ApproxRKHSIVCV_q(ApproxRKHSIV_q):
                 scores[it1].append([])
                 for alpha_scale in alpha_scales:
                     alpha = self._get_alpha(delta_train, alpha_scale)
-                    a = np.linalg.pinv(AQA_train + alpha *
-                                       np.eye(self.n_components)) @ B_train
+                    # a = np.linalg.pinv(AQA_train + alpha *
+                    #                    np.eye(self.n_components)) @ B_train
+                    a = np.linalg.lstsq(AQA_train + alpha *
+                                       np.eye(self.n_components), B_train, rcond=None)[0]
                     res = RootKf_test.T @ (y[test] - RootKh_test @ a)
                     scores[it1][it2].append((res.T @ Q_test @ res).reshape(-1)[0] / (len(test)**2))
 
@@ -756,6 +792,7 @@ class ApproxRKHSIVCV_q(ApproxRKHSIV_q):
         A = RootKh.T @ RootKf
         W = (A @ Q @ A.T + self.best_alpha * np.eye(self.n_components))
         B = A @ Q @ RootKf.T @ y
-        self.a = np.linalg.pinv(W) @ B
+        # self.a = np.linalg.pinv(W) @ B
+        self.a = np.linalg.lstsq(W, B, rcond=None)[0]
         self.fitted_delta = delta
         return self
