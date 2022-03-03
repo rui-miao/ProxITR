@@ -496,8 +496,7 @@ class proxITR:
         
         if self.verbose:
             # save coefficients and value
-            # self.d1_X_coef = d1_X.predict(np.concatenate((np.zeros((1,self.X.shape[1])),np.eye(self.X.shape[1]))))
-            self.d1_X_coef = np.insert(d1_X.named_steps['svm'].W, 0, d1_X.named_steps['svm'].b)
+            # self.d1_X_coef = np.insert(d1_X.named_steps['svm'].W, 0, d1_X.named_steps['svm'].b)
             # save final value
             d1_X_est = np.sign(d1_X.predict(self.X))
             h0_test = np.zeros_like(d1_X_est)
@@ -604,8 +603,7 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            # self.d1_XZ_coef = d1_XZ.predict(np.concatenate((np.zeros((1,data_XZ.shape[1])),np.eye(data_XZ.shape[1]))))
-            self.d1_XZ_coef = np.insert(d1_XZ.named_steps['svm'].W, 0, d1_XZ.named_steps['svm'].b)
+            # self.d1_XZ_coef = np.insert(d1_XZ.named_steps['svm'].W, 0, d1_XZ.named_steps['svm'].b)
             # save final value
             d1_XZ_est = np.sign(d1_XZ.predict(data_XZ))
             h0_test = np.zeros_like(d1_XZ_est)
@@ -696,8 +694,7 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            # self.d2_coef = d2.predict(np.concatenate((np.zeros((1,data_XW.shape[1])),np.eye(data_XW.shape[1]))))
-            self.d2_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
+            # self.d2_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
             # save final value
             d2_est = np.sign(d2.predict(data_XW))
             self.d2_value = np.mean(self.Y*self.q0_est*(d2_est==(np.sign(self.A-0.5))))
@@ -727,68 +724,67 @@ class proxITR:
                 values.append([])
                 yq0_train = self.Y[train_index]*self.predict_q0(n_components=n_components, index=train_index)
                 for rho in rhos:
-                    #d3 = SVC(kernel='rbf', C=rho, gamma=gamma_SVC)
+                    #d2 = SVC(kernel='rbf', C=rho, gamma=gamma_SVC)
                     if linearity == 'nonlinear':
-                        d3 = ApproxNonLinear(transX=transX, featX=featX, rho=rho, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
-                        d3.fit(X = self.X[train_index,:], 
+                        d2 = ApproxNonLinear(transX=transX, featX=featX, rho=rho, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
+                        d2.fit(X = self.X[train_index,:], 
                                 y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                                 sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
                     if linearity == 'linear':
-                        d3 = clone(self.PipeLinear)
-                        d3.set_params(svm__rho=rho, svm__learning_rate=learning_rate)
-                        d3.fit(X = self.X[train_index,:], 
+                        d2 = clone(self.PipeLinear)
+                        d2.set_params(svm__rho=rho, svm__learning_rate=learning_rate)
+                        d2.fit(X = self.X[train_index,:], 
                             y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                             svm__sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
                     if linearity == 'tree':
-                        d3 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho)
-                        d3.fit(X = self.X[train_index,:], 
+                        d2 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho)
+                        d2.fit(X = self.X[train_index,:], 
                                 y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                                 sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
 
-                    d3_est = np.sign(d3.predict(self.X[test_index,:]))
-                    values[it].append(np.mean(self.Y[test_index]*self.q0_est[test_index]*(d3_est==(np.sign(self.A[test_index]-0.5)))))
+                    d2_est = np.sign(d2.predict(self.X[test_index,:]))
+                    values[it].append(np.mean(self.Y[test_index]*self.q0_est[test_index]*(d2_est==(np.sign(self.A[test_index]-0.5)))))
 
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
 
             if self.verbose:
-                print("d3_X")
+                print("d2_X")
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
         else:
             rho_best = rhos
 
-        #d3 = SVC(kernel='rbf', C=rho_best, gamma=gamma_SVC)
+        #d2 = SVC(kernel='rbf', C=rho_best, gamma=gamma_SVC)
         if linearity == 'nonlinear':
-            d3 = ApproxNonLinear(transX=transX, featX=featX, rho=rho_best, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
-            d3.fit(X = self.X,
+            d2 = ApproxNonLinear(transX=transX, featX=featX, rho=rho_best, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
+            d2.fit(X = self.X,
                    y = ayq0_sign,
                    sample_weight=yq0_abs/yq0_abs.mean())
         if linearity == 'linear':
-            d3 = clone(self.PipeLinear)
-            d3.set_params(svm__rho=rho_best, svm__learning_rate=learning_rate)
-            d3.fit(X = self.X, 
+            d2 = clone(self.PipeLinear)
+            d2.set_params(svm__rho=rho_best, svm__learning_rate=learning_rate)
+            d2.fit(X = self.X, 
                    y = ayq0_sign,
                    svm__sample_weight=yq0_abs/yq0_abs.mean())
         if linearity == 'tree':
-            d3 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho_best)
-            d3.fit(X = self.X,
+            d2 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho_best)
+            d2.fit(X = self.X,
                    y = ayq0_sign,
                    sample_weight=yq0_abs/yq0_abs.mean())
-            return d3
+            return d2
 
         if self.verbose:
             # save coefficients and value
-            # self.d3_coef = d3.predict(np.concatenate((np.zeros((1,self.X.shape[1])),np.eye(self.X.shape[1]))))
-            self.d3_coef = np.insert(d3.named_steps['svm'].W, 0, d3.named_steps['svm'].b)
+            # self.d2_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
             # save final value
-            d3_est = np.sign(d3.predict(self.X))
-            self.d3_value = np.mean(self.Y*self.q0_est*(d3_est==(np.sign(self.A-0.5))))
+            d2_est = np.sign(d2.predict(self.X))
+            self.d2_value = np.mean(self.Y*self.q0_est*(d2_est==(np.sign(self.A-0.5))))
 
-        def d3_predictor(X):
-            return np.sign(d3.predict(X))
-        return d3_predictor
+        def d2_predictor(X):
+            return np.sign(d2.predict(X))
+        return d2_predictor
 
     
     def C0C1(self, paras, n_components=20, train_index='all', test_index='all'):
@@ -943,8 +939,7 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            #self.d_DR_coef = d_DR_predict(np.concatenate((np.zeros((1,self.X.shape[1])),np.eye(self.X.shape[1]))))
-            self.d_DR_coef = np.mean(d_DR_coef, axis=0)
+            # self.d_DR_coef = np.mean(d_DR_coef, axis=0)
             # save final value
             d_DR_est = d_DR_predictor(self.X)
             self.d_DR_value = (np.sum(C0_all[d_DR_est<0])+np.sum(C1_all[d_DR_est>=0]))/self.X.shape[0]
