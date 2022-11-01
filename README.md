@@ -1,8 +1,7 @@
 # ProxITR
 Proximal Learning for Individualized Treatment Regimes Under Unmeasured Confounding
 
-## Installation
-### Requirement
+## Requirements
 
 ```
 python >= 3.8
@@ -21,15 +20,16 @@ conda install pandas scikit-learn numpy scipy pytorch torchvision torchaudio cud
 
 ## Content
 
-- [data](./data/) contains data files or files to generate simulation data
+- [notebooks](./notebooks): Usage examples for all simulation settings in the paper, in each example:
+    - `samp_size`: sample size is 2000 (users can try other settings)
+    - `qtl`: the quantile for dPESS selection, default is 0.4 (users can try other settings)
+- [data](./data/) contains file to generate simulated data
 - [src](./src/) source files:
     - [proxITR.py](./src/proxITR.py): main file of proximal ITR learning
     - [rkhs_scaler.py](./src/rkhs_scaler.py): estimators of ourcome bridge function h0 and treatment bridge function q0
     - [torchSVC.py](./src/torchSVC.py): optimizer of weighted binary support vector classification
-- [notebooks](./notebooks): Usage examples
 
 ## Citation
-Cite this repository by
 
 ```
 @misc{qi2021proximal,

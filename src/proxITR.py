@@ -12,7 +12,6 @@ from sklearn.svm import LinearSVC
 from sklearn.linear_model import SGDClassifier
 from sklearn import tree
 from sklearn import pipeline
-from sklearn.kernel_approximation import Nystroem
 from sklearn.preprocessing import RobustScaler as Scaler
 #from sklearn.preprocessing import StandardScaler as Scaler
 from sklearn.model_selection import KFold
@@ -107,7 +106,7 @@ def FastOptBW(X, y, sample_weight=None, n_gammas=10):
     return gammas[torch.argmax(HSICs)].data.tolist()
 #%%
 class proxITR:
-    def __init__(self, A,X,Z,W,Y, god=False, U=None, h0=None, q0=None, d_X_opt=None, learning_rate=0.1, n_epoch=10000, batch_size = 200, n_components = 150, opt='LBFGS', verbose=False):
+    def __init__(self, A,X,Z,W,Y, god=False, U=None, h0=None, q0=None, d_X_opt=None, learning_rate=0.1, n_epoch=10000, batch_size = 200, n_components = 150, opt='LBFGS', verbose=False, qtl = 0.4):
         self.A = A.to_numpy(dtype=int).reshape(-1)
         self.X = X.to_numpy()
         self.Z = Z.to_numpy()
@@ -136,9 +135,10 @@ class proxITR:
                                   ("svm", 
                                         RegimeLearner(batch_size=self.batch_size, n_epoch=self.n_epoch))])
         self.opt = opt # 'LBFGS' or 'SGD'
-        self.batch_size = batch_size
         self.n_components = n_components
         self.verbose = verbose
+        self.qtl = qtl
+        self.qtl_value = {'d1_X': [], 'd1_XZ': [], 'd2_XW': [], 'd2_X': [], 'd_DR': []}
         
 
     def fit_h0_a0(self, n_components=20, gamma_f='auto', gamma_h=0.1, alpha_scale='auto',index='all'):
@@ -409,10 +409,6 @@ class proxITR:
     def fit_d1_X_cv(self, gamma_f, n_gamma_hs, n_alphas=20, alpha_scales='auto', n_components=50, cv_n=5, cv_r=5, linearity = 'nonlinear', rhos = [0.005, 0.01, 0.05, 0.1, 0.5], learning_rate=None):
         if learning_rate is None:
             learning_rate=self.learning_rate
-        # if (not 'gamma_f_h0_a0' in self.__dict__) or (not 'gamma_h_h0_a0' in self.__dict__) or (not 'alpha_scale_h0_a0' in self.__dict__) or (not 'predict_h0_a0' in self.__dict__) or (cv_n != self.cv_h0_a0):
-        #     self.fit_h0_a0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
-        # if (not 'gamma_f_h0_a1' in self.__dict__) or (not 'gamma_h_h0_a1' in self.__dict__) or (not 'alpha_scale_h0_a1' in self.__dict__) or (not 'predict_h0_a1' in self.__dict__) or (cv_n != self.cv_h0_a1):
-        #     self.fit_h0_a1_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.fit_h0_a0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.fit_h0_a1_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
 
@@ -457,21 +453,25 @@ class proxITR:
                     d1_X_est = np.sign(d1_X.predict(self.X[test_index,:]))
                     h0_test = np.zeros_like(d1_X_est)
                     if np.sum(d1_X_est==-1)>0:
-                        #h0_test[d1_X_est==-1] = predict_h0_a0_train(data_WX[test_index,:][d1_X_est==-1,:])
                         h0_test[d1_X_est==-1] = self.predict_h0_a0(data_WX[test_index,:][d1_X_est==-1,:])
                     if np.sum(d1_X_est==1)>0:
-                        #h0_test[d1_X_est==1]  = predict_h0_a1_train(data_WX[test_index,:][d1_X_est==1,:])
                         h0_test[d1_X_est==1]  = self.predict_h0_a1(data_WX[test_index,:][d1_X_est==1,:])
                     values[it].append(np.mean(h0_test))
 
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
 
+            q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+            q_best = q_values[np.argmax(avg_values)]
+            # self.qtl_value['d1_X'].append(q_best)
+            self.qtl_value['d1_X'] = q_best
+
             if self.verbose:
                 print("d1_X")
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
+                print("qtl_best:", self.qtl_value['d1_X'])
         else:
             rho_best = rhos
 
@@ -496,7 +496,8 @@ class proxITR:
         
         if self.verbose:
             # save coefficients and value
-            # self.d1_X_coef = np.insert(d1_X.named_steps['svm'].W, 0, d1_X.named_steps['svm'].b)
+            if linearity=='linear':
+                self.d1_X_coef = np.insert(d1_X.named_steps['svm'].W, 0, d1_X.named_steps['svm'].b)
             # save final value
             d1_X_est = np.sign(d1_X.predict(self.X))
             h0_test = np.zeros_like(d1_X_est)
@@ -513,10 +514,6 @@ class proxITR:
     def fit_d1_XZ_cv(self, gamma_f, n_gamma_hs, n_alphas=20, alpha_scales='auto', n_components=50, cv_n=5, cv_r=5, linearity = 'nonlinear', rhos = [0.005, 0.01, 0.05, 0.1, 0.5], learning_rate=None):
         if learning_rate is None:
             learning_rate=self.learning_rate
-        # if (not 'gamma_f_h0_a0' in self.__dict__) or (not 'gamma_h_h0_a0' in self.__dict__) or (not 'alpha_scale_h0_a0' in self.__dict__) or (not 'predict_h0_a0' in self.__dict__) or (cv_n != self.cv_h0_a0):
-        #     self.fit_h0_a0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
-        # if (not 'gamma_f_h0_a1' in self.__dict__) or (not 'gamma_h_h0_a1' in self.__dict__) or (not 'alpha_scale_h0_a1' in self.__dict__) or (not 'predict_h0_a1' in self.__dict__) or (cv_n != self.cv_h0_a1):
-        #     self.fit_h0_a1_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.fit_h0_a0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.fit_h0_a1_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
 
@@ -570,6 +567,11 @@ class proxITR:
 
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
+
+            q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+            q_best = q_values[np.argmax(avg_values)]
+            self.qtl_value['d1_XZ'] = q_best
+            # self.qtl_value['d1_XZ'].append(q_best)
             
             # record best value of d1_XZ
             self.cv_d1_XZ = np.max(avg_values)
@@ -579,6 +581,7 @@ class proxITR:
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
+                print("qtl_best:", self.qtl_value['d1_XZ'])
         else:
             rho_best = rhos
 
@@ -603,7 +606,8 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            # self.d1_XZ_coef = np.insert(d1_XZ.named_steps['svm'].W, 0, d1_XZ.named_steps['svm'].b)
+            if linearity=='linear':
+                self.d1_XZ_coef = np.insert(d1_XZ.named_steps['svm'].W, 0, d1_XZ.named_steps['svm'].b)
             # save final value
             d1_XZ_est = np.sign(d1_XZ.predict(data_XZ))
             h0_test = np.zeros_like(d1_XZ_est)
@@ -620,8 +624,6 @@ class proxITR:
     def fit_d2_XW_cv(self, gamma_f, n_gamma_hs, n_alphas=20, alpha_scales='auto', n_components=50, cv_n=5, cv_r=5, linearity = 'nonlinear', rhos = [0.005, 0.01, 0.05, 0.1, 0.5], learning_rate=None):
         if learning_rate is None:
             learning_rate=self.learning_rate
-        # if (not 'q0_est' in self.__dict__) or (self.cv_q0_a0 != cv_n) or (self.cv_q0_a1 != cv_n):
-        #     self.predict_q0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.predict_q0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
 
         ayq0_sign = np.sign(self.A-0.5)*np.sign(self.Y)*np.sign(self.q0_est)
@@ -662,6 +664,11 @@ class proxITR:
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
 
+            q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+            q_best = q_values[np.argmax(avg_values)]
+            # self.qtl_value['d2_XW'].append(q_best)
+            self.qtl_value['d2_XW']= q_best
+
             # record best value of d2_XW
             self.cv_d2_XW = np.max(avg_values)
 
@@ -670,6 +677,7 @@ class proxITR:
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
+                print("qtl_best:", self.qtl_value['d2_XW'])
         else:
             rho_best = rhos
 
@@ -694,7 +702,8 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            # self.d2_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
+            if linearity=='linear':
+                self.d2_XW_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
             # save final value
             d2_est = np.sign(d2.predict(data_XW))
             self.d2_value = np.mean(self.Y*self.q0_est*(d2_est==(np.sign(self.A-0.5))))
@@ -706,8 +715,6 @@ class proxITR:
     def fit_d2_X_cv(self, gamma_f, n_gamma_hs, n_alphas=20, alpha_scales='auto', n_components=50, cv_n=5, cv_r=5, linearity = 'nonlinear', rhos = [0.005, 0.01, 0.05, 0.1, 0.5], learning_rate=None):
         if learning_rate is None:
             learning_rate=self.learning_rate
-        # if (not 'q0_est' in self.__dict__) or (self.cv_q0_a0 != cv_n) or (self.cv_q0_a1 != cv_n):
-        #     self.predict_q0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
         self.predict_q0_cv(gamma_f=gamma_f, n_gamma_hs=n_gamma_hs, n_alphas=n_alphas, alpha_scales=alpha_scales, n_components=n_components, cv=cv_n)
 
         ayq0_sign = np.sign(self.A-0.5)*np.sign(self.Y)*np.sign(self.q0_est)
@@ -724,67 +731,74 @@ class proxITR:
                 values.append([])
                 yq0_train = self.Y[train_index]*self.predict_q0(n_components=n_components, index=train_index)
                 for rho in rhos:
-                    #d2 = SVC(kernel='rbf', C=rho, gamma=gamma_SVC)
+                    #d2_X = SVC(kernel='rbf', C=rho, gamma=gamma_SVC)
                     if linearity == 'nonlinear':
-                        d2 = ApproxNonLinear(transX=transX, featX=featX, rho=rho, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
-                        d2.fit(X = self.X[train_index,:], 
+                        d2_X = ApproxNonLinear(transX=transX, featX=featX, rho=rho, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
+                        d2_X.fit(X = self.X[train_index,:], 
                                 y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                                 sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
                     if linearity == 'linear':
-                        d2 = clone(self.PipeLinear)
-                        d2.set_params(svm__rho=rho, svm__learning_rate=learning_rate)
-                        d2.fit(X = self.X[train_index,:], 
+                        d2_X = clone(self.PipeLinear)
+                        d2_X.set_params(svm__rho=rho, svm__learning_rate=learning_rate)
+                        d2_X.fit(X = self.X[train_index,:], 
                             y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                             svm__sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
                     if linearity == 'tree':
-                        d2 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho)
-                        d2.fit(X = self.X[train_index,:], 
+                        d2_X = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho)
+                        d2_X.fit(X = self.X[train_index,:], 
                                 y = np.sign(self.A[train_index]-0.5)*np.sign(yq0_train),
                                 sample_weight=np.abs(yq0_train)/np.mean(np.abs(yq0_train)))
 
-                    d2_est = np.sign(d2.predict(self.X[test_index,:]))
-                    values[it].append(np.mean(self.Y[test_index]*self.q0_est[test_index]*(d2_est==(np.sign(self.A[test_index]-0.5)))))
+                    d2_X_est = np.sign(d2_X.predict(self.X[test_index,:]))
+                    values[it].append(np.mean(self.Y[test_index]*self.q0_est[test_index]*(d2_X_est==(np.sign(self.A[test_index]-0.5)))))
 
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
+
+            q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+            q_best = q_values[np.argmax(avg_values)]
+            self.qtl_value['d2_X'] = q_best
 
             if self.verbose:
                 print("d2_X")
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
+                print("qtl_best:", self.qtl_value['d2_X'])
         else:
             rho_best = rhos
 
-        #d2 = SVC(kernel='rbf', C=rho_best, gamma=gamma_SVC)
+        #d2_X = SVC(kernel='rbf', C=rho_best, gamma=gamma_SVC)
         if linearity == 'nonlinear':
-            d2 = ApproxNonLinear(transX=transX, featX=featX, rho=rho_best, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
-            d2.fit(X = self.X,
+            d2_X = ApproxNonLinear(transX=transX, featX=featX, rho=rho_best, n_epoch=self.n_epoch, batch_size = self.batch_size, learning_rate=learning_rate, opt=self.opt)
+            d2_X.fit(X = self.X,
                    y = ayq0_sign,
                    sample_weight=yq0_abs/yq0_abs.mean())
         if linearity == 'linear':
-            d2 = clone(self.PipeLinear)
-            d2.set_params(svm__rho=rho_best, svm__learning_rate=learning_rate)
-            d2.fit(X = self.X, 
+            d2_X = clone(self.PipeLinear)
+            d2_X.set_params(svm__rho=rho_best, svm__learning_rate=learning_rate)
+            d2_X.fit(X = self.X, 
                    y = ayq0_sign,
                    svm__sample_weight=yq0_abs/yq0_abs.mean())
         if linearity == 'tree':
-            d2 = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho_best)
-            d2.fit(X = self.X,
+            d2_X = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho_best)
+            d2_X.fit(X = self.X,
                    y = ayq0_sign,
                    sample_weight=yq0_abs/yq0_abs.mean())
-            return d2
+            return d2_X
 
         if self.verbose:
             # save coefficients and value
-            # self.d2_coef = np.insert(d2.named_steps['svm'].W, 0, d2.named_steps['svm'].b)
+            # self.d2_X_coef = d2_X.predict(np.concatenate((np.zeros((1,self.X.shape[1])),np.eye(self.X.shape[1]))))
+            if linearity=='linear':
+                self.d2_X_coef = np.insert(d2_X.named_steps['svm'].W, 0, d2_X.named_steps['svm'].b)
             # save final value
-            d2_est = np.sign(d2.predict(self.X))
-            self.d2_value = np.mean(self.Y*self.q0_est*(d2_est==(np.sign(self.A-0.5))))
+            d2_X_est = np.sign(d2_X.predict(self.X))
+            self.d2_X_value = np.mean(self.Y*self.q0_est*(d2_X_est==(np.sign(self.A-0.5))))
 
-        def d2_predictor(X):
-            return np.sign(d2.predict(X))
-        return d2_predictor
+        def d2_X_predictor(X):
+            return np.sign(d2_X.predict(X))
+        return d2_X_predictor
 
     
     def C0C1(self, paras, n_components=20, train_index='all', test_index='all'):
@@ -858,6 +872,7 @@ class proxITR:
         
         return CI
 
+
     def fit_d_DR_cv(self, gamma_f, n_gamma_hs, n_alphas=20, h_alpha_scales='auto', q_alpha_scales='auto',
                     n_components=50, cv_n=5, cv_r=3, linearity = 'nonlinear', rhos = [0.005, 0.01, 0.05, 0.1, 0.5], learning_rate=None):
         if learning_rate is None:
@@ -879,7 +894,6 @@ class proxITR:
             for it1, (TRAIN_INDEX, TEST_INDEX) in enumerate(StratifiedKFold(n_splits=cv_r, random_state=None, shuffle=False).split(self.X, C1_C0_sign_cv)):
                 values.append([])
                 d_DR_est = np.zeros((len(TEST_INDEX), len(rhos)))
-                #for train_index, test_index in StratifiedKFold(n_splits=cv_r, random_state=None, shuffle=False).split(self.X[TRAIN_INDEX,:],C1_C0_sign_cv[TRAIN_INDEX]):
                 for test_index, train_index in StratifiedKFold(n_splits=cv_r, random_state=None, shuffle=False).split(self.X[TRAIN_INDEX,:],C1_C0_sign_cv[TRAIN_INDEX]):
                     C0, C1 = C0_all[TRAIN_INDEX[test_index]], C1_all[TRAIN_INDEX[test_index]]
                     for it2, rho in enumerate(rhos):
@@ -901,17 +915,22 @@ class proxITR:
             
             avg_values = np.mean(np.array(values), axis=0)
             rho_best = rhos[np.argmax(avg_values)]
+
+            q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+            q_best = q_values[np.argmax(avg_values)]
+            self.qtl_value['d_DR'] = q_best
+
             if self.verbose:
                 print("d_DR")
                 print("rho: ",rhos)
                 print("value: ",avg_values)
                 print("rho_best:", rho_best)
+                print("qtl_best:", self.qtl_value['d_DR'])
         else:
             rho_best = rhos
 
         predictors = []
         d_DR_coef = np.zeros((cv_r, self.X.shape[1]+1))
-        #for it, (train_index, test_index) in enumerate(StratifiedKFold(n_splits=cv_r, random_state=None, shuffle=False).split(self.X,C1_C0_sign_cv)):
         for it, (test_index, train_index) in enumerate(StratifiedKFold(n_splits=cv_r, random_state=None, shuffle=False).split(self.X,C1_C0_sign_cv)):
             C0, C1 = C0_all[test_index], C1_all[test_index]
             if linearity == 'nonlinear':
@@ -939,7 +958,8 @@ class proxITR:
 
         if self.verbose:
             # save coefficients and value
-            # self.d_DR_coef = np.mean(d_DR_coef, axis=0)
+            if linearity=='linear':
+                self.d_DR_coef = np.mean(d_DR_coef, axis=0)
             # save final value
             d_DR_est = d_DR_predictor(self.X)
             self.d_DR_value = (np.sum(C0_all[d_DR_est<0])+np.sum(C1_all[d_DR_est>=0]))/self.X.shape[0]
@@ -970,11 +990,16 @@ class proxITR:
         avg_values = np.mean(np.array(values), axis=0)
         rho_best = rhos[np.argmax(avg_values)]
 
+        q_values = np.quantile(np.array(values), q=self.qtl, axis=0)
+        q_best = q_values[np.argmax(avg_values)]
+        self.qtl_value['d_DR'] = q_best
+
         if self.verbose:
             print("d_DR")
             print("rho: ",rhos)
             print("value: ",avg_values)
             print("rho_best:", rho_best)
+            print("qtl_best:", self.qtl_value['d_DR'])
         
         d_DR = tree.DecisionTreeClassifier(random_state=0, ccp_alpha=rho_best)
         d_DR.fit(X = self.X,
