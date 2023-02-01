@@ -32,12 +32,14 @@ conda install pandas scikit-learn numpy scipy pytorch torchvision torchaudio cud
 ## Citation
 
 ```
-@misc{qi2021proximal,
-      title={Proximal Learning for Individualized Treatment Regimes Under Unmeasured Confounding}, 
-      author={Zhengling Qi and Rui Miao and Xiaoke Zhang},
-      year={2021},
-      eprint={2105.01187},
-      archivePrefix={arXiv},
-      primaryClass={stat.ME}
+@article{qi2022proximal,
+  title={Proximal learning for individualized treatment regimes under unmeasured confounding},
+  author={Qi, Zhengling and Miao, Rui and Zhang, Xiaoke},
+  journal={Journal of the American Statistical Association},
+  number={just-accepted},
+  pages={1--33},
+  year={2022},
+  publisher={Taylor \& Francis}
 }
+
 ```
